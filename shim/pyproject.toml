@@ -7,7 +7,8 @@ name = "baton-shim"
 version = "0.1.0"
 description = "MCP shim that lets AI agents use a Baton coordination server"
 requires-python = ">=3.10"
-dependencies = ["mcp>=1.2"]
+# Pinned below 2.0: mcp 2.x renamed FastMCP to MCPServer. Migrate deliberately when needed.
+dependencies = ["mcp>=1.2,<2"]
 
 [project.scripts]
 baton-shim = "baton_shim.server:main"
