@@ -1,0 +1,11 @@
+build/
+cmake-build-*/
+.cache/
+compile_commands.json
+*.wal
+__pycache__/
+*.egg-info/
+.venv/
+.idea/
+.vscode/
+.DS_Store

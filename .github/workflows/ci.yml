@@ -1,0 +1,30 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  server:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Configure
+        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Debug -DBATON_SANITIZE=ON
+      - name: Build
+        run: cmake --build build -j
+      - name: Unit tests
+        run: ctest --test-dir build --output-on-failure
+
+  shim:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install shim
+        run: pip install -e shim
+      - name: Import check
+        run: python -c "import baton_shim.server"
