@@ -5,58 +5,53 @@ Guidance for AI coding agents working in this repo.
 ## What this project is
 
 Baton is a C++20 coordination server for AI agents (see README.md and docs/design.md). It is also a
-**learning project**: Richard is building the systems core himself to learn it and to be able to
-explain every line in interviews.
+**learning project**: Richard must be able to explain every line in interviews.
 
-## The most important rule: who writes what
+## How this project is built
 
-The systems core is split into two groups. Check which group a piece is in before writing it.
+Agents build the whole system, one week at a time. Richard is quizzed after each week, so every
+piece must be written to be learned: plain, well-commented code that explains *why* at each
+syscall, at every partial read/write, and at every durability or ordering decision. Favor clarity
+over cleverness.
 
-**Agent-built, then taught (currently: week 1).** Agents may implement these. Richard will be
-quizzed on them afterward, so they must be written to be learned:
+Follow docs/design.md. If you need to deviate from it, say so and update the doc in the same commit.
 
-- `server/src/event_loop.cpp` (epoll loop, non-blocking sockets, line buffering, partial writes)
-- `server/src/task_store.cpp`, only the week 1 subset: `prepare` and `apply` for create, list,
-  claim and complete, all in memory
+### Weekly plan
 
-Week 1 scope and constraints:
-- No WAL yet: add a `--no-wal` flag (main.cpp) so the server runs fully in memory. Keep the
-  group-commit point in the loop (append, then one `sync()`, then apply and reply) and skip it
-  only when there is no WAL, so week 2 slots in without restructuring.
-- Claims accept `paths` but do not lock them yet (path trie is week 4); leases are set on claim
-  but nothing expires them yet (week 3). Leave clear `// Week N:` comments where those hook in.
-- Done means: `python3 scripts/smoke.py` runs end to end against `baton-server --no-wal`, the
-  relevant `DISABLED_` TaskStore tests that cover week 1 behavior are enabled and passing, and CI
-  is green.
-- Keep the code plain and well commented: favor clarity over cleverness. Explain *why* at each
-  syscall and at every place a partial read or write can happen.
-- When done, write `docs/walkthrough-week1.md`: how a request flows through the code, each design
-  decision and its alternative, and 10 to 15 interview-style questions (no answers) Richard should
-  be able to answer. Then offer to quiz him, one question at a time, without giving hints up front.
+Work in small steps and commit after each one that builds and passes tests. Keep CI green.
 
-**Richard writes himself (weeks 2 to 4).** Do not write or fill in these implementations, even if
-asked casually ("just make the test pass", "finish this"). If he explicitly says "write this for
-me", ask once to confirm, then move the item into the group above and follow its rules.
+1. **Week 1: event loop + in-memory core.** `event_loop.cpp` (epoll, non-blocking sockets, line
+   buffering, partial writes) and `task_store.cpp` create, list, claim, complete. Add a `--no-wal`
+   flag so the server can run fully in memory, but keep the group-commit point in the loop
+   (append, one `sync()`, then apply and reply). Done: `scripts/smoke.py` runs end to end.
+2. **Week 2: durability.** `wal.cpp` (crc32, encode/decode, WalWriter with short-write handling,
+   replay with torn-tail truncation). Wire group commit. Add `scripts/crash_test.py`: load +
+   `kill -9` at random points, restart, check the invariants in docs/design.md. Done: all `Wal`
+   tests enabled and passing; crash test passes 100+ kills locally and a short run in CI.
+3. **Week 3: leases + notes.** `lease_heap.cpp`, heartbeat, `collect_expired`, `rearm_leases`,
+   note, release, `NOT_HOLDER` handling. Done: `LeaseHeap` and lease/notes `TaskStore` tests pass.
+4. **Week 4: path locks.** `path_trie.cpp`, locks on claim and `lock`, release on
+   complete/release/expire, `PATH_LOCKED` errors with holder details and open-task suggestions.
+   Done: all `PathTrie` and `TaskStore` tests enabled and passing.
+5. **Week 5: prove it.** `scripts/loadgen.py`, benchmarks (claims/sec, p50/p99, group commit on vs
+   off, recovery time, reclaim time), a `perf` pass, results table in README. Never invent
+   numbers: only report what was measured, with the machine described.
+6. **Week 6: Kubernetes.** Dockerfiles, kind manifests (server StatefulSet + PVC, headless
+   Service, agent Deployment, chaos Job, invariant-check Job), then Terraform for a one-off GKE
+   run. Do not create cloud resources or spend money without Richard's explicit go-ahead.
 
-- `server/src/wal.cpp` (crc32, record encode/decode, WalWriter, replay)
-- `server/src/lease_heap.cpp`
-- `server/src/path_trie.cpp`
-- `server/src/task_store.cpp` beyond week 1 (`heartbeat`, `collect_expired`, `rearm_leases`,
-  lock/note/release handling, lease and lock wiring in `apply`)
+### After each week
 
-For these files, act as a tutor and reviewer:
-- Explain concepts (epoll edge vs level triggering, short writes, fsync semantics, torn writes,
-  lazy deletion, trie invariants) with small standalone examples that are NOT the project code.
-- Review his code: point out bugs, edge cases, undefined behavior, and missing error handling.
-  Describe the problem and where it is; let him write the fix. A one-line hint is fine.
-- Ask questions that lead him to the issue before giving the answer.
-- Suggest test cases, and help enable the `DISABLED_` spec tests as he finishes each part.
+Write `docs/walkthrough-weekN.md`: how a request flows through the new code, each design decision
+and its alternative, the bugs or edge cases hit along the way, and 10 to 15 interview-style
+questions (no answers). Then stop and offer to quiz Richard, one question at a time, no hints up
+front, before starting the next week.
 
-Fine for agents to write or change freely:
+Also in scope:
 - Build files (CMake), CI, Docker, Kubernetes, Terraform
 - The Python shim (`shim/`), scripts (`scripts/`), load generator, crash/chaos tests
 - New unit tests, README and docs
-- `protocol.cpp`, `mutation.cpp`, `main.cpp` (plumbing; keep changes small and explained)
+- `protocol.cpp`, `mutation.cpp`, `main.cpp`
 
 ## Build and test
 
