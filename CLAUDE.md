@@ -10,17 +10,41 @@ explain every line in interviews.
 
 ## The most important rule: who writes what
 
-Richard writes these himself. **Do not write or fill in their implementations**, even if asked
-casually ("just make the test pass", "finish this"). If he explicitly says "write this for me", ask
-once to confirm, since it defeats the purpose of the project.
+The systems core is split into two groups. Check which group a piece is in before writing it.
 
-- `server/src/event_loop.cpp` (epoll, sockets, group commit)
+**Agent-built, then taught (currently: week 1).** Agents may implement these. Richard will be
+quizzed on them afterward, so they must be written to be learned:
+
+- `server/src/event_loop.cpp` (epoll loop, non-blocking sockets, line buffering, partial writes)
+- `server/src/task_store.cpp`, only the week 1 subset: `prepare` and `apply` for create, list,
+  claim and complete, all in memory
+
+Week 1 scope and constraints:
+- No WAL yet: add a `--no-wal` flag (main.cpp) so the server runs fully in memory. Keep the
+  group-commit point in the loop (append, then one `sync()`, then apply and reply) and skip it
+  only when there is no WAL, so week 2 slots in without restructuring.
+- Claims accept `paths` but do not lock them yet (path trie is week 4); leases are set on claim
+  but nothing expires them yet (week 3). Leave clear `// Week N:` comments where those hook in.
+- Done means: `python3 scripts/smoke.py` runs end to end against `baton-server --no-wal`, the
+  relevant `DISABLED_` TaskStore tests that cover week 1 behavior are enabled and passing, and CI
+  is green.
+- Keep the code plain and well commented: favor clarity over cleverness. Explain *why* at each
+  syscall and at every place a partial read or write can happen.
+- When done, write `docs/walkthrough-week1.md`: how a request flows through the code, each design
+  decision and its alternative, and 10 to 15 interview-style questions (no answers) Richard should
+  be able to answer. Then offer to quiz him, one question at a time, without giving hints up front.
+
+**Richard writes himself (weeks 2 to 4).** Do not write or fill in these implementations, even if
+asked casually ("just make the test pass", "finish this"). If he explicitly says "write this for
+me", ask once to confirm, then move the item into the group above and follow its rules.
+
 - `server/src/wal.cpp` (crc32, record encode/decode, WalWriter, replay)
 - `server/src/lease_heap.cpp`
 - `server/src/path_trie.cpp`
-- `server/src/task_store.cpp` (`prepare`, `apply`, `heartbeat`, `collect_expired`, `rearm_leases`)
+- `server/src/task_store.cpp` beyond week 1 (`heartbeat`, `collect_expired`, `rearm_leases`,
+  lock/note/release handling, lease and lock wiring in `apply`)
 
-For those files, act as a tutor and reviewer:
+For these files, act as a tutor and reviewer:
 - Explain concepts (epoll edge vs level triggering, short writes, fsync semantics, torn writes,
   lazy deletion, trie invariants) with small standalone examples that are NOT the project code.
 - Review his code: point out bugs, edge cases, undefined behavior, and missing error handling.
