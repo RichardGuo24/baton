@@ -16,6 +16,8 @@ namespace baton {
 
 enum class Op { Create, List, Claim, Heartbeat, Lock, Note, Complete, Release };
 
+const char* to_string(Op op);  // the wire name, e.g. "claim"
+
 struct Request {
     uint64_t req_id = 0;
     Op op = Op::List;

@@ -67,6 +67,11 @@ class TaskStore {
     size_t size() const { return tasks_.size(); }
 
    private:
+    PrepareResult prepare_create(const Request& req, TimeMs now) const;
+    PrepareResult prepare_claim(const Request& req, TimeMs now) const;
+    PrepareResult prepare_complete(const Request& req, TimeMs now) const;
+    std::string open_suggestions() const;
+
     std::unordered_map<TaskId, Task> tasks_;
     std::set<TaskId> open_;  // ordered: oldest open task first
     PathTrie locks_;

@@ -28,6 +28,20 @@ const char* to_string(TaskState state) {
     return "open";
 }
 
+const char* to_string(Op op) {
+    switch (op) {
+        case Op::Create: return "create";
+        case Op::List: return "list";
+        case Op::Claim: return "claim";
+        case Op::Heartbeat: return "heartbeat";
+        case Op::Lock: return "lock";
+        case Op::Note: return "note";
+        case Op::Complete: return "complete";
+        case Op::Release: return "release";
+    }
+    return "unknown";
+}
+
 namespace {
 
 const std::unordered_map<std::string, Op>& op_names() {
