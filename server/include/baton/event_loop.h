@@ -17,7 +17,9 @@
 
 #include <cstdint>
 #include <string>
+#include <string_view>
 #include <unordered_map>
+#include <vector>
 
 #include "baton/clock.h"
 #include "baton/task_store.h"
@@ -40,17 +42,43 @@ class Server {
     Server(const Server&) = delete;
     Server& operator=(const Server&) = delete;
 
-    // TODO(richard): create a non-blocking listening socket and the epoll instance, then loop
-    // until stop() is called.
+    // Bind the listening socket, then serve until SIGINT/SIGTERM or stop(). Throws on setup
+    // failure, and if a WAL sync fails (memory is then ahead of disk, so we must not continue).
     void run();
     void stop() { running_ = false; }
+
+    // Largest request line we accept. A client that sends more without a newline gets an error
+    // and is disconnected, so one bad client cannot make the server buffer unbounded memory.
+    static constexpr size_t kMaxLineBytes = 1 << 20;  // 1 MiB
+    // If a client stops reading replies, stop reading its requests once this much output is queued.
+    static constexpr size_t kMaxOutBytes = 16 << 20;  // 16 MiB
 
    private:
     struct Connection {
         int fd = -1;
-        std::string in_buf;   // bytes read but not yet a full line
-        std::string out_buf;  // bytes queued but not yet written
+        std::string in_buf;        // bytes read but not yet a full line
+        std::string out_buf;       // bytes queued but not yet written
+        bool stop_reading = false;  // peer sent EOF, or we gave up on its input
+        bool closing = false;       // queued to be closed at the end of this iteration
+        uint32_t events = 0;        // what this fd is currently registered for in epoll
     };
+
+    // A reply waiting for the iteration's commit point (see the comment at the top of this file).
+    struct HeldReply {
+        int fd;
+        std::string line;
+    };
+
+    void open_listener();
+    void open_signalfd();
+    void accept_all();
+    void on_readable(Connection& c);
+    void handle_line(Connection& c, std::string_view line);
+    void commit_and_release_replies();
+    void flush(Connection& c);
+    void update_interest(Connection& c);
+    void mark_for_close(Connection& c);
+    void close_marked();
 
     ServerConfig config_;
     TaskStore& store_;
@@ -58,8 +86,11 @@ class Server {
     const Clock& clock_;
     int listen_fd_ = -1;
     int epoll_fd_ = -1;
+    int signal_fd_ = -1;
     bool running_ = false;
     std::unordered_map<int, Connection> conns_;
+    std::vector<HeldReply> held_;  // replies produced this iteration, in arrival order
+    std::vector<int> to_close_;    // fds to close once this iteration's events are handled
 };
 
 }  // namespace baton

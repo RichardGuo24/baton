@@ -47,9 +47,7 @@ int main(int argc, char** argv) {
             // In-memory mode: nothing to replay, nothing to write. The loop still holds replies
             // until its (now no-op) commit point, so behavior matches the durable mode.
             baton::Server server(config, store, nullptr, clock);
-            std::cerr << "listening on " << config.host << ":" << config.port
-                      << " (--no-wal: state is in memory only)\n";
-            server.run();
+            server.run();  // prints the address it listens on
             return 0;
         }
 
@@ -63,7 +61,6 @@ int main(int argc, char** argv) {
         // 2. Open the log for appending and start serving.
         baton::WalWriter wal(config.wal_path);
         baton::Server server(config, store, &wal, clock);
-        std::cerr << "listening on " << config.host << ":" << config.port << "\n";
         server.run();
     } catch (const std::exception& e) {
         std::cerr << "baton-server: " << e.what() << "\n";
