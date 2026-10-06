@@ -13,6 +13,10 @@ option(BATON_SANITIZE "Build with AddressSanitizer + UBSan" OFF)
 option(BATON_BUILD_TESTS "Build unit tests" ON)
 
 add_compile_options(-Wall -Wextra -Wpedantic)
+if(APPLE AND BATON_SANITIZE)
+  message(WARNING "BATON_SANITIZE on macOS: ASan test binaries may hang at startup with recent "
+                  "Apple clang. Use -DBATON_SANITIZE=OFF on the Mac; CI and Linux run sanitizers.")
+endif()
 if(BATON_SANITIZE)
   add_compile_options(-fsanitize=address,undefined -fno-omit-frame-pointer)
   add_link_options(-fsanitize=address,undefined)

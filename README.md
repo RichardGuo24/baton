@@ -54,9 +54,33 @@ ctest --test-dir build --output-on-failure
 Run the server and poke it directly:
 
 ```bash
-./build/server/baton-server --port 7000 --wal baton.wal
+./build/server/baton-server --port 7000 --wal baton.wal   # durable (from week 2)
+./build/server/baton-server --port 7000 --no-wal          # in memory only
 python3 scripts/smoke.py
 ```
+
+### Developing on macOS
+
+The server uses `epoll`, so it only builds on Linux. On macOS, CMake builds the core library and
+unit tests and skips `baton-server`. Build the Mac side without sanitizers: with recent macOS and
+Apple clang, AddressSanitizer binaries hang at startup inside `malloc` initialization.
+
+```bash
+cmake -S . -B build -DCMAKE_BUILD_TYPE=Debug -DBATON_SANITIZE=OFF
+```
+
+To build and run the server, use a Linux VM such as [Multipass](https://multipass.run) that mounts
+the repo. Keep the Linux build directory on the VM's own disk, not in the mounted folder: it is much
+faster, and a mount that drops mid-link can leave a truncated binary that `make` thinks is fresh.
+
+```bash
+multipass exec primary --working-directory /home/ubuntu -- bash -c "cd /path/in/vm/to/baton && \
+  cmake -S . -B ~/baton-build -DCMAKE_BUILD_TYPE=Debug -DBATON_SANITIZE=ON && \
+  cmake --build ~/baton-build -j && ctest --test-dir ~/baton-build --output-on-failure"
+```
+
+If the repo lives under `~/Desktop` or `~/Documents`, give `multipassd` Full Disk Access
+(System Settings → Privacy & Security) or the VM sees those folders as empty.
 
 ## Use it from an agent
 

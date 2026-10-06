@@ -23,7 +23,7 @@ Work in small steps and commit after each one that builds and passes tests. Keep
 1. **Week 1: event loop + in-memory core.** `event_loop.cpp` (epoll, non-blocking sockets, line
    buffering, partial writes) and `task_store.cpp` create, list, claim, complete. Add a `--no-wal`
    flag so the server can run fully in memory, but keep the group-commit point in the loop
-   (append, one `sync()`, then apply and reply). Done: `scripts/smoke.py` runs end to end.
+   (prepare, apply and append each request; one `sync()`; then send the held replies). Done: `scripts/smoke.py` runs end to end.
 2. **Week 2: durability.** `wal.cpp` (crc32, encode/decode, WalWriter with short-write handling,
    replay with torn-tail truncation). Wire group commit. Add `scripts/crash_test.py`: load +
    `kill -9` at random points, restart, check the invariants in docs/design.md. Done: all `Wal`

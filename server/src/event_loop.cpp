@@ -6,7 +6,7 @@
 
 namespace baton {
 
-Server::Server(ServerConfig config, TaskStore& store, WalWriter& wal, const Clock& clock)
+Server::Server(ServerConfig config, TaskStore& store, WalWriter* wal, const Clock& clock)
     : config_(std::move(config)), store_(store), wal_(wal), clock_(clock) {}
 
 Server::~Server() {

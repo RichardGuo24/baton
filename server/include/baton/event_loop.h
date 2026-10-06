@@ -3,13 +3,17 @@
 // Single-threaded epoll server. One loop iteration:
 //   1. epoll_wait(timeout = time until store.next_expiry(), or -1 if none)
 //   2. accept new connections; read available bytes into each connection's in_buf
-//   3. for every complete line: parse -> prepare -> wal.append (mutations) or answer directly
-//      (list, heartbeat, errors)
-//   4. collect_expired(now) -> wal.append each ExpireM
+//   3. for every complete line, in arrival order: parse -> prepare -> apply -> wal.append.
+//      The reply (ok, error, or a read like list) is HELD, not sent.
+//   4. collect_expired(now) -> apply + wal.append each ExpireM
 //   5. wal.sync()   <- one fsync covers everything appended this iteration (group commit)
-//   6. apply every pending mutation, queue its response into out_buf
+//   6. move every held reply into its connection's out_buf, in arrival order
 //   7. write out_bufs (handle partial writes; watch EPOLLOUT when a socket is full)
-// Replies to step-3 mutations are only queued after step 5, so "ok" always means "on disk".
+//
+// Why apply in step 3 instead of after the fsync: if two claims for the same task arrive in one
+// iteration, the second must see the first one's effect, or both would succeed. Holding every
+// reply until step 5 keeps "ok" meaning "on disk", and nobody ever sees non-durable state.
+// If sync() fails, memory is ahead of disk and cannot be rolled back, so the server exits.
 
 #include <cstdint>
 #include <string>
@@ -25,11 +29,13 @@ struct ServerConfig {
     std::string host = "0.0.0.0";
     uint16_t port = 7000;
     std::string wal_path = "baton.wal";
+    bool use_wal = true;  // --no-wal: keep all state in memory only (lost on restart)
 };
 
 class Server {
    public:
-    Server(ServerConfig config, TaskStore& store, WalWriter& wal, const Clock& clock);
+    // `wal` may be null (--no-wal). The loop still runs the same steps; it just skips the disk.
+    Server(ServerConfig config, TaskStore& store, WalWriter* wal, const Clock& clock);
     ~Server();
     Server(const Server&) = delete;
     Server& operator=(const Server&) = delete;
@@ -48,7 +54,7 @@ class Server {
 
     ServerConfig config_;
     TaskStore& store_;
-    WalWriter& wal_;
+    WalWriter* wal_;  // null when running with --no-wal
     const Clock& clock_;
     int listen_fd_ = -1;
     int epoll_fd_ = -1;

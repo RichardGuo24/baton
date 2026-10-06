@@ -13,8 +13,9 @@
 namespace {
 
 void usage() {
-    std::cerr << "usage: baton-server [--host ADDR] [--port N] [--wal PATH]\n"
-                 "  defaults: --host 0.0.0.0 --port 7000 --wal baton.wal\n";
+    std::cerr << "usage: baton-server [--host ADDR] [--port N] [--wal PATH | --no-wal]\n"
+                 "  defaults: --host 0.0.0.0 --port 7000 --wal baton.wal\n"
+                 "  --no-wal: keep everything in memory only; all state is lost on exit\n";
 }
 
 }  // namespace
@@ -33,6 +34,7 @@ int main(int argc, char** argv) {
         if (arg == "--host") config.host = next();
         else if (arg == "--port") config.port = static_cast<uint16_t>(std::stoi(next()));
         else if (arg == "--wal") config.wal_path = next();
+        else if (arg == "--no-wal") config.use_wal = false;
         else if (arg == "-h" || arg == "--help") { usage(); return 0; }
         else { usage(); return 2; }
     }
@@ -40,6 +42,16 @@ int main(int argc, char** argv) {
     try {
         baton::SystemClock clock;
         baton::TaskStore store;
+
+        if (!config.use_wal) {
+            // In-memory mode: nothing to replay, nothing to write. The loop still holds replies
+            // until its (now no-op) commit point, so behavior matches the durable mode.
+            baton::Server server(config, store, nullptr, clock);
+            std::cerr << "listening on " << config.host << ":" << config.port
+                      << " (--no-wal: state is in memory only)\n";
+            server.run();
+            return 0;
+        }
 
         // 1. Rebuild state from the log through the same apply() the live server uses.
         baton::ReplayResult replay = baton::replay_wal(config.wal_path);
@@ -50,7 +62,7 @@ int main(int argc, char** argv) {
 
         // 2. Open the log for appending and start serving.
         baton::WalWriter wal(config.wal_path);
-        baton::Server server(config, store, wal, clock);
+        baton::Server server(config, store, &wal, clock);
         std::cerr << "listening on " << config.host << ":" << config.port << "\n";
         server.run();
     } catch (const std::exception& e) {

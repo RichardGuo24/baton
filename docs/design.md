@@ -61,10 +61,10 @@ One C++ process owns all state, and the Python shims are thin translators, so ev
  |  baton-server (C++20, one thread)                                        |
  |                                                                          |
  |  epoll event loop  -->  Request handler  -->  WAL writer ----------------+--> baton.wal
- |  (sockets, reads,       (parse, prepare        (append; one fsync        |    (disk, CRC
- |   lease timers)          a Mutation)            per loop iteration)      |     per record)
+ |  (sockets, reads,       (parse, prepare,       (append; one fsync        |    (disk, CRC
+ |   lease timers)          apply, append)         per loop iteration)      |     per record)
  |                              |                                           |        |
- |                              | apply after fsync                         |        |
+ |                              | apply now; reply only after fsync         |        |
  |              +---------------+---------------+                           |        |
  |              v               v               v                           |        |
  |         Task table      Lease heap       Path trie   <-------------------+--------+
@@ -72,7 +72,7 @@ One C++ process owns all state, and the Python shims are thin translators, so ev
  +--------------------------------------------------------------------------+
 ```
 
-Each request flows down: the event loop reads a full line, the handler validates it and builds a `Mutation`, the WAL writer appends it and fsyncs once per batch, and only then is the mutation applied to the task table, lease heap and path trie and the reply sent. The event loop also acts as the lease timer: its `epoll_wait` timeout is the time until the heap's next expiry. On startup, the log is replayed into the same three structures before any connection is accepted.
+Each request flows down: the event loop reads a full line, the handler validates it and builds a `Mutation`, applies it to the task table, lease heap and path trie, and appends it to the WAL buffer. The reply is held. At the end of the loop iteration one `fsync` covers every appended record, and only then are the held replies sent, in arrival order. The event loop also acts as the lease timer: its `epoll_wait` timeout is the time until the heap's next expiry. On startup, the log is replayed into the same three structures before any connection is accepted.
 
 ### Code map
 
@@ -166,7 +166,7 @@ If every path in a request passes, all are locked together; if any fails, none a
 
 ## Durability
 
-The rule is: write the change to the log, `fsync`, then apply it in memory, then reply. An agent never hears "ok" for something that could be lost.
+The rule is: no reply leaves the server until every change it depends on has been written to the log and `fsync`'d. An agent never hears "ok" for something that could be lost.
 
 **Record format (little-endian)**
 
@@ -178,6 +178,8 @@ The rule is: write the change to the log, `fsync`, then apply it in memory, then
 | `payload` | `len - 1` bytes | The mutation's fields as JSON (v1; easy to inspect with `strings`) |
 
 **Group commit.** Requests that arrive in the same event-loop iteration are appended together and covered by one `fsync` before any of them is answered. Under load this turns many fsyncs into one, and it is the main lever in the benchmarks.
+
+**Apply immediately, reply after fsync.** Within an iteration each request is prepared *and applied* before the next one is looked at, and its record is appended to the WAL buffer. Every reply (including reads and errors) is held until the iteration's single `fsync` succeeds, then sent in arrival order. The obvious alternative, preparing every request first and applying them all after the `fsync`, is wrong: two claims of the same task in one batch would both validate against the unchanged state and both succeed. Holding *all* replies also keeps responses on a connection in request order and means nobody observes state that is not yet durable. The cost: if `fsync` fails, memory is already ahead of disk and cannot be rolled back, so the server exits and recovers from the log on restart (the same lesson PostgreSQL learned from "fsyncgate" in 2018: after a failed `fsync` you cannot trust the page cache).
 
 **Heartbeats are not logged.** Logging them would multiply writes by about 3 for no benefit. Instead, on recovery every task that replays as Claimed gets a fresh lease of `now + 60s` (`rearm_leases`). A live agent keeps it with its next heartbeat; a dead one loses it one lease later.
 
