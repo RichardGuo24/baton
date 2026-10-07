@@ -6,7 +6,7 @@ Agents connect over [MCP](https://modelcontextprotocol.io). They claim tasks, **
 
 The server is written from scratch in C++20: a single-threaded `epoll` event loop, a write-ahead log with replay-based crash recovery, a lease heap, and a path trie for hierarchical file locks.
 
-> **Status:** early development. The protocol, mutation codec and MCP shim work; the event loop, WAL, leases and locks are being built now. See [Roadmap](#roadmap).
+> **Status:** early development. The protocol, mutation codec, MCP shim, epoll event loop and in-memory create/claim/complete work (`--no-wal`); the WAL, leases and locks are being built now. See [Roadmap](#roadmap).
 
 ## How it works
 
@@ -106,7 +106,7 @@ Tools the agent gets: `create_task`, `list_tasks`, `claim_task`, `lock_paths`, `
 ## Roadmap
 
 - [x] Wire protocol, mutation codec, MCP shim, CI
-- [ ] Week 1: epoll event loop; create, list, claim, complete in memory
+- [x] Week 1: epoll event loop; create, list, claim, complete in memory
 - [ ] Week 2: write-ahead log, replay, `kill -9` crash test
 - [ ] Week 3: leases with expiry, handoff notes
 - [ ] Week 4: hierarchical path locks
