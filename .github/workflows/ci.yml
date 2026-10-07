@@ -16,6 +16,15 @@ jobs:
         run: cmake --build build -j
       - name: Unit tests
         run: ctest --test-dir build --output-on-failure
+      - name: End-to-end server tests
+        run: python3 scripts/test_server.py -v
+      - name: Smoke test
+        run: |
+          ./build/server/baton-server --host 127.0.0.1 --port 7000 --no-wal &
+          sleep 1
+          python3 scripts/smoke.py
+          kill -TERM %1
+          wait %1
 
   shim:
     runs-on: ubuntu-24.04
