@@ -231,7 +231,7 @@ void Server::on_readable(Connection& c) {
         // Safe to close now if nothing is queued: we read at most once per connection per
         // iteration, so the read that saw EOF cannot have produced held replies for this client.
         // If output is still queued, flush() closes the connection once it drains.
-        if (c.out_buf.empty()) mark_for_close(c);
+        if (c.unsent() == 0) mark_for_close(c);
         return;
     }
 
@@ -331,7 +331,7 @@ void Server::commit_and_release_replies() {
     // buffer and go out right here, without waiting for an EPOLLOUT event.
     for (HeldReply& r : held_) {
         auto it = conns_.find(r.fd);
-        if (it != conns_.end() && !it->second.closing && !it->second.out_buf.empty()) {
+        if (it != conns_.end() && !it->second.closing && it->second.unsent() > 0) {
             flush(it->second);
         }
     }
@@ -339,34 +339,47 @@ void Server::commit_and_release_replies() {
 }
 
 void Server::flush(Connection& c) {
-    while (!c.out_buf.empty()) {
-        // send() may write only part of the buffer (a "short write") when the socket's send
+    while (c.unsent() > 0) {
+        // send() may write only part of what we ask (a "short write") when the socket's send
         // buffer is nearly full, e.g. a slow client or a large list reply. Whatever was not
-        // written stays in out_buf and we try again when epoll says the socket is writable.
+        // written stays queued and we try again when epoll says the socket is writable.
         // MSG_NOSIGNAL: writing to a socket the peer closed raises SIGPIPE, whose default action
         // kills the whole process. With this flag we get an EPIPE error instead.
-        ssize_t n = ::send(c.fd, c.out_buf.data(), c.out_buf.size(), MSG_NOSIGNAL);
+        ssize_t n = ::send(c.fd, c.out_buf.data() + c.out_off, c.unsent(), MSG_NOSIGNAL);
         if (n < 0) {
             if (errno == EINTR) continue;
             if (errno == EAGAIN || errno == EWOULDBLOCK) break;  // socket full: wait for EPOLLOUT
             mark_for_close(c);  // EPIPE, ECONNRESET: the client is gone
             return;
         }
-        c.out_buf.erase(0, static_cast<size_t>(n));
+        // Advance an offset instead of erasing the sent bytes from the front. Erasing shifts the
+        // whole remaining buffer each time: a 3 MB reply sent in 4 KB pieces would copy about
+        // 750 * 1.5 MB on average, i.e. quadratic. We found this with the slow-reader test.
+        c.out_off += static_cast<size_t>(n);
+    }
+    if (c.unsent() == 0) {
+        c.out_buf.clear();
+        c.out_off = 0;
+    } else if (c.out_off > c.out_buf.size() / 2) {
+        // Mostly sent: drop the sent prefix so the buffer does not grow forever for a client that
+        // always has a little output pending. Shifting only when at least half is consumed keeps
+        // the copying linear overall (each byte moves at most a constant number of times).
+        c.out_buf.erase(0, c.out_off);
+        c.out_off = 0;
     }
     update_interest(c);
-    if (c.out_buf.empty() && c.stop_reading) mark_for_close(c);  // EOF'd client, all answered
+    if (c.unsent() == 0 && c.stop_reading) mark_for_close(c);  // EOF'd client, all answered
 }
 
 void Server::update_interest(Connection& c) {
     // Ask epoll only for the events we can act on right now:
     //   EPOLLIN  unless we stopped reading this client, or its unread replies are piling up
     //            (backpressure: a client that never reads must not grow out_buf forever).
-    //   EPOLLOUT only while out_buf has bytes. A socket is writable almost all the time, so with
+    //   EPOLLOUT only while there are unsent bytes. A socket is writable almost all the time, so with
     //            level-triggered epoll an always-on EPOLLOUT would wake us up constantly.
     uint32_t want = 0;
-    if (!c.stop_reading && c.out_buf.size() < kMaxOutBytes) want |= EPOLLIN;
-    if (!c.out_buf.empty()) want |= EPOLLOUT;
+    if (!c.stop_reading && c.unsent() < kMaxOutBytes) want |= EPOLLIN;
+    if (c.unsent() > 0) want |= EPOLLOUT;
     if (want == c.events || c.closing) return;  // nothing changed: skip the syscall
 
     epoll_event ev{};

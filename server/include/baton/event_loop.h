@@ -57,10 +57,13 @@ class Server {
     struct Connection {
         int fd = -1;
         std::string in_buf;        // bytes read but not yet a full line
-        std::string out_buf;       // bytes queued but not yet written
+        std::string out_buf;       // bytes queued for this client; the first out_off are sent
+        size_t out_off = 0;        // how much of out_buf has already been written
         bool stop_reading = false;  // peer sent EOF, or we gave up on its input
         bool closing = false;       // queued to be closed at the end of this iteration
         uint32_t events = 0;        // what this fd is currently registered for in epoll
+
+        size_t unsent() const { return out_buf.size() - out_off; }
     };
 
     // A reply waiting for the iteration's commit point (see the comment at the top of this file).
